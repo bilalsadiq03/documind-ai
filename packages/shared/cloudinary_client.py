@@ -1,4 +1,5 @@
 import os
+import io
 import cloudinary
 import cloudinary.uploader
 
@@ -9,10 +10,15 @@ cloudinary.config(
     secure=True,
 )
 
-def upload_text_file(content: str, filename: str) -> str:
+def upload_markdown(content: str, filename: str) -> str:
+    # Convert string to file-like object
+    file_obj = io.BytesIO(content.encode("utf-8"))
+
     result = cloudinary.uploader.upload(
-        content,
+        file_obj,
         public_id=filename,
-        resource_type="raw"
+        resource_type="raw",
+        overwrite=True
     )
+
     return result["secure_url"]

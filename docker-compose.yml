@@ -29,7 +29,9 @@ services:
       - redis
 
   worker:
-    build: ./apps/worker
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
     container_name: documind-worker
     env_file:
       - .env

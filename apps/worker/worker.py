@@ -5,10 +5,16 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 
+
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import Column, String, DateTime, Text
 from sqlalchemy.sql import func
 import uuid
+import traceback
+from git import Repo
+from packages.ai_core.gemini_client import generate_text
+from packages.ai_core.repo_analyzer import collect_files, build_prompt
+from packages.shared.cloudinary_client import upload_markdown
 
 Base = declarative_base()
 
@@ -31,6 +37,7 @@ SessionLocal = sessionmaker(bind=engine)
 redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
 QUEUE_NAME = "documind:jobs"
+WORKDIR = "/tmp/documind_repos"
 
 print("Worker started... Waiting for jobs...")
 
@@ -53,17 +60,43 @@ while True:
         job.progress = "10%"
         db.commit()
 
-        time.sleep(5)
-  
-        job.status = "done"
-        job.progress = "100%"
-        job.result_url = "https://example.com/fake-docs-link"
+        # 1. clone repo
+        repo_path = os.path.join(WORKDIR, job_id)
+        if os.path.exists(repo_path):
+            shutil.rmtree(repo_path)
+        
+        Repo.clone_from(job.repo_url, repo_path)
+        job.progress = "30%"
         db.commit()
 
+        # 2. Collect files
+        files = collect_files(repo_path)
+        job.progress = "50%"
+        db.commit()
+
+        # 3. Build Prompt
+        prompt = build_prompt(files)
+
+        # 4. Call Gemini
+        docs = generate_text(prompt)
+        job.progress = "80%"
+        db.commit()
+
+        # 5. Upload to Cloudinary
+        filename = f"documind/{job_id}/README.md"
+        url = upload_markdown(docs, filename)
+
+        # 6. Save result
+        job.status = "done"
+        job.progress = "100%"
+        job.result_url = url
+        db.commit()
+        
         print(f"Job {job_id} completed")
 
     except Exception as e:
         print("Error processing job:", e)
+        traceback.print_exc()
         if job:
             job.status = "failed"
             job.progress = "0%"
